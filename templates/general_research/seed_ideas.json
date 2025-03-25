@@ -1,0 +1,10 @@
+[
+    {
+        "Name": "experiment_creation",
+        "Title": "Create Experiment 'AI for Sentiment Analysis on Social Media' From Scratch to Research Paper",
+        "Experiment": "Create the experiment from scratch to research paper for this problem: An AI system that monitors social media posts or interactions to analyze the sentiment of users about a brand, product, or service. This AI system generates reports on how the public is reacting to different advertising campaigns, helping companies adjust their marketing strategies accordingly. Now you have to follow this explanation to create the solution: Follow the structure of the existing templates, which consist of: experiment.py — This is the main script where the core content is. It takes an argument --out_dir, which specifies where it should create the folder and save the relevant information from the run. plot.py — This script takes the information from the run folders and creates plots. The code should be clear and easy to edit. prompt.json — Put information about your template here. seed_ideas.json — Place example ideas here. You can also try to generate ideas without any examples and then pick the best one or two to put here. latex/template.tex — We recommend using our LaTeX folder but be sure to replace the pre-loaded citations with ones that you expect to be more relevant. The key to making new templates work is matching the base filenames and output JSONs to the existing format; everything else is free to change. You should also ensure that the template.tex file is updated to use the correct citation style / base plots for your template.",
+        "Interestingness": 9,
+        "Feasibility": 8,
+        "Novelty": 9
+    }
+]

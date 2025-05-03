@@ -13,6 +13,7 @@ from aider.io import InputOutput
 from aider.models import Model
 from datetime import datetime
 
+from ai_scientist.setup_experiment import setup_experiment
 from ai_scientist.generate_ideas import generate_ideas, check_idea_novelty
 from ai_scientist.llm import create_client, AVAILABLE_LLMS
 from ai_scientist.perform_experiments import perform_experiments
@@ -334,6 +335,17 @@ if __name__ == "__main__":
 
     base_dir = osp.join("templates", args.experiment)
     results_dir = osp.join("results", args.experiment)
+    
+    
+    # SETUP_EXPERIMENT
+    setup_experiment(
+        base_dir,
+        client=client,
+        model=client_model,
+        num_reflections=NUM_REFLECTIONS,
+    )
+
+    
     ideas = generate_ideas(
         base_dir,
         client=client,

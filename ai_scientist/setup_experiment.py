@@ -10,64 +10,9 @@ from ai_scientist.llm import get_response_from_llm, extract_json_between_markers
 
 S2_API_KEY = os.getenv("S2_API_KEY")
 
-idea_first_prompt = """{task_description}
-<experiment.py>
-{code}
-</experiment.py>
-
-
-Come up with the next impactful and creative idea for research experiments and directions you can feasibly investigate with the code provided.
-Note that you will not have access to any additional resources or datasets.
-Make sure any idea is not overfit the specific training dataset or model, and has wider significance.
-
-Respond in the following format:
-
-THOUGHT:
-<THOUGHT>
-
-NEW IDEA JSON:
-```json
-<JSON>
-```
-
-In <THOUGHT>, first briefly discuss your intuitions and motivations for the idea. Detail your high-level plan, necessary design choices and ideal outcomes of the experiments. Justify how the idea is different from the existing ones.
-
-In <JSON>, provide the new idea in JSON format with the following fields:
-- "Name": A shortened descriptor of the idea. Lowercase, no spaces, underscores allowed.
-- "Title": A title for the idea, will be used for the report writing.
-- "Experiment": An outline of the implementation. E.g. which functions need to be added or modified, how results will be obtained, ...
-- "Interestingness": A rating from 1 to 10 (lowest to highest).
-- "Feasibility": A rating from 1 to 10 (lowest to highest).
-- "Novelty": A rating from 1 to 10 (lowest to highest).
-
-Be cautious and realistic on your ratings.
-This JSON will be automatically parsed, so ensure the format is precise.
-You will have {num_reflections} rounds to iterate on the idea, but do not need to use them all.
-"""
-
-idea_reflection_prompt = """Round {current_round}/{num_reflections}.
-In your thoughts, first carefully consider the quality, novelty, and feasibility of the idea you just created.
-Include any other factors that you think are important in evaluating the idea.
-Ensure the idea is clear and concise, and the JSON is the correct format.
-Do not make things overly complicated.
-In the next attempt, try and refine and improve your idea.
-Stick to the spirit of the original idea unless there are glaring issues.
-
-Respond in the same format as before:
-THOUGHT:
-<THOUGHT>
-
-NEW IDEA JSON:
-```json
-<JSON>
-```
-
-If there is nothing to improve, simply repeat the previous JSON EXACTLY after the thought and include "I am done" at the end of the thoughts but before the JSON.
-ONLY INCLUDE "I am done" IF YOU ARE MAKING NO MORE CHANGES."""
 
 
 
-# GENERATE IDEAS
 def generate_experiment(
     base_dir,
     client,
@@ -144,6 +89,231 @@ def experiment_exists(base_dir) -> bool:
     return False
 
 
+
+
+
+metric_first_prompt = """{task_description}
+
+Here are the metrics that you have already generated:
+
+'''
+{prev_metrics_string}
+'''
+
+Come up with the next meaningful and creative evaluation metric for assessing progress in this task.
+You should define a metric that captures useful aspects of performance, going beyond simple accuracy or loss where possible.
+
+Be sure the metric is:
+- Quantifiable and reproducible.
+- Not overly reliant on specific datasets or model architectures.
+- Aligned with the overall goals of the task described above.
+
+Respond in the following format:
+
+THOUGHT:
+<THOUGHT>
+
+NEW METRIC JSON:
+```json
+<JSON>
+"""
+
+
+metric_reflection_prompt = """Round {current_round}/{num_reflections}.
+
+Carefully reconsider the metric you just proposed. In your thoughts, assess:
+- How useful and meaningful the metric is in this context.
+- Whether the metric is practical to implement and interpret.
+- Whether it adds something new compared to existing metrics.
+- Whether the JSON is correctly formatted and clearly written.
+
+Try to improve and refine the metric accordingly, keeping the core idea intact unless there's a clear reason to change it.
+
+Respond in the same format as before:
+
+THOUGHT:
+<THOUGHT>
+
+NEW METRIC JSON:
+```json
+<JSON>
+"""
+
+
+
+def generate_metrics(
+        base_dir,
+        client,
+        model,
+        skip_generation=False,
+        max_num_generations=20,
+        num_reflections=5,
+):
+    if skip_generation:
+        try:
+            with open(osp.join(base_dir, "metrics.json"), "r") as f:
+                metrics = json.load(f)
+            print("Loaded existing metrics:")
+            for metric in metrics:
+                print(metric)
+            return metrics
+        except FileNotFoundError:
+            print("No existing metrics found. Generating new metrics.")
+        except json.JSONDecodeError:
+            print("Error decoding existing metrics. Generating new metrics.")
+
+    metric_str_archive = []
+    with open(osp.join(base_dir, "seed_metrics.json"), "r") as f:
+        seed_metrics = json.load(f)
+    for seed_metric in seed_metrics:
+        metric_str_archive.append(json.dumps(seed_metric))
+
+    with open(osp.join(base_dir, "prompt.json"), "r") as f:
+        prompt = json.load(f)
+
+    idea_system_prompt = prompt["system"]
+    task_description = prompt["task_description"]
+
+    for i in range(max_num_generations):
+        print()
+        print(f"Generating metric {i + 1}/{max_num_generations}")
+        try:
+            prev_metrics_string = "\n\n".join(metric_str_archive)
+
+            msg_history = []
+            print(f"Iteration 1/{num_reflections}")
+            text, msg_history = get_response_from_llm(
+                metric_first_prompt.format(
+                    task_description=task_description,
+                    prev_metrics_string=prev_metrics_string,
+                    num_reflections=num_reflections,
+                ),
+                client=client,
+                model=model,
+                system_message=idea_system_prompt,
+                msg_history=msg_history,
+            )
+
+            json_output = extract_json_between_markers(text)
+            assert json_output is not None, "Failed to extract JSON from LLM output"
+            print(json_output)
+
+            if num_reflections > 1:
+                for j in range(num_reflections - 1):
+                    print(f"Iteration {j + 2}/{num_reflections}")
+                    text, msg_history = get_response_from_llm(
+                        metric_reflection_prompt.format(
+                            current_round=j + 2, num_reflections=num_reflections
+                        ),
+                        client=client,
+                        model=model,
+                        system_message=idea_system_prompt,
+                        msg_history=msg_history,
+                    )
+
+                    json_output = extract_json_between_markers(text)
+                    assert json_output is not None, "Failed to extract JSON from LLM output"
+                    print(json_output)
+
+                    if "I am done" in text:
+                        print(f"Metric generation converged after {j + 2} iterations.")
+                        break
+
+            metric_str_archive.append(json.dumps(json_output))
+        except Exception as e:
+            print(f"Failed to generate metric: {e}")
+            continue
+
+    metrics = [json.loads(m) for m in metric_str_archive]
+    with open(osp.join(base_dir, "metrics.json"), "w") as f:
+        json.dump(metrics, f, indent=4)
+
+    return metrics
+
+
+
+def generate_next_metric(
+        base_dir,
+        client,
+        model,
+        prev_metric_archive=[],
+        num_reflections=5,
+        max_attempts=10,
+):
+    metric_archive = prev_metric_archive
+    original_archive_size = len(metric_archive)
+
+    print(f"Generating metric {original_archive_size + 1}")
+
+    if len(prev_metric_archive) == 0:
+        print("First iteration, taking seed metrics")
+        with open(osp.join(base_dir, "seed_metrics.json"), "r") as f:
+            seed_metrics = json.load(f)
+        for seed_metric in seed_metrics[:1]:
+            metric_archive.append(seed_metric)
+    else:
+        with open(osp.join(base_dir, "prompt.json"), "r") as f:
+            prompt = json.load(f)
+
+        idea_system_prompt = prompt["system"]
+        task_description = prompt["task_description"]
+
+        for _ in range(max_attempts):
+            try:
+                prev_metrics_string = "\n\n".join(
+                    [json.dumps(metric) for metric in metric_archive]
+                )
+
+                msg_history = []
+                print(f"Iteration 1/{num_reflections}")
+                text, msg_history = get_response_from_llm(
+                    metric_first_prompt.format(
+                        task_description=task_description,
+                        prev_metrics_string=prev_metrics_string,
+                        num_reflections=num_reflections,
+                    ),
+                    client=client,
+                    model=model,
+                    system_message=idea_system_prompt,
+                    msg_history=msg_history,
+                )
+
+                json_output = extract_json_between_markers(text)
+                assert json_output is not None, "Failed to extract JSON from LLM output"
+                print(json_output)
+
+                if num_reflections > 1:
+                    for j in range(num_reflections - 1):
+                        print(f"Iteration {j + 2}/{num_reflections}")
+                        text, msg_history = get_response_from_llm(
+                            metric_reflection_prompt.format(
+                                current_round=j + 2,
+                                num_reflections=num_reflections,
+                            ),
+                            client=client,
+                            model=model,
+                            system_message=idea_system_prompt,
+                            msg_history=msg_history,
+                        )
+
+                        json_output = extract_json_between_markers(text)
+                        assert json_output is not None, "Failed to extract JSON from LLM output"
+                        print(json_output)
+
+                        if "I am done" in text:
+                            print(f"Metric generation converged after {j + 2} iterations.")
+                            break
+
+                metric_archive.append(json_output)
+                break
+            except Exception as e:
+                print(f"Failed to generate metric: {e}")
+                continue
+
+    with open(osp.join(base_dir, "metrics.json"), "w") as f:
+        json.dump(metric_archive, f, indent=4)
+
+    return metric_archive
 
 
 

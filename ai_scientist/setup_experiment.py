@@ -12,6 +12,78 @@ S2_API_KEY = os.getenv("S2_API_KEY")
 
 
 
+metric_first_prompt = """{system}
+{task_description}
+
+Here are the metrics you have already generated:
+
+'''
+{prev_metrics_string}
+'''
+
+Your task is to propose a new scientific metric that is:
+
+- Quantifiable and clearly defined
+- Useful for evaluating the success or failure of the scientific objective stated above
+- Able to support or refute hypotheses based on empirical results
+- Suitable for monitoring changes or trends
+- Expressed in a form that ensures reproducibility and objectivity
+- Not overfitted to any specific dataset or model, and instead based on generalizable principles
+
+Describe the metric in a concise way, including its name, what it measures, how it is calculated, and why it is useful in the context of the objective. Do not invent data or assume access to external sources.
+
+Note that you will not have access to any additional resources or datasets.
+Make sure that no metric is overfitted to the specific dataset or training model and has a broader meaning.
+
+Respond in the following format:
+
+THOUGHT:
+<THOUGHT>
+
+NEW JSON IDEA:
+```json
+<JSON>
+```
+
+In <THOUGHT>, first briefly discuss your intuitions and motivations for the metric. Detail your high-level plan, the design choices needed, and how the new metric will help measure the results you achieve. Justify how the metric is different from the existing ones.
+
+In <JSON>, provide the new idea in JSON format with the following fields:
+- "Name": A shortened descriptor of the metric. Lowercase, no spaces, underscores allowed.
+- "Title": A title for the metric, will be used for the report writing.
+- "Definition": A clear and precise description of what the metric measures. It should make it clear what is being quantified.
+- "Limitations": Point out weaknesses in the metric, such as contexts in which it may generate misleading interpretations or failure to reflect actual performance.
+- "Dependencies": Clearly list what data, variables, or intermediate results are needed to calculate the metric.
+
+Be cautious and realistic about your ratings.
+This JSON will be automatically parsed, so ensure the format is precise.
+You will have {num_reflections} rounds to iterate on the idea, but do not need to use them all.
+"""
+
+
+metric_reflection_prompt = """Round {current_round}/{num_reflections}.
+
+Carefully reconsider the metric you just proposed. In your thoughts, assess:
+- How useful and meaningful the metric is in this context.
+- Whether the metric is practical to implement and interpret.
+- Whether it adds something new compared to existing metrics.
+- Whether the JSON is correctly formatted and clearly written.
+
+Try to improve and refine the metric accordingly, keeping the core idea intact unless there's a clear reason to change it.
+
+Respond in the same format as before:
+
+THOUGHT:
+<THOUGHT>
+
+NEW METRIC JSON:
+```json
+<JSON>
+"""
+
+
+
+
+
 
 def generate_experiment(
     base_dir,
@@ -39,7 +111,8 @@ def generate_experiment(
     msg_history = []
 
     text, msg_history = get_response_from_llm(
-                idea_first_prompt.format(
+                metric_first_prompt.format(
+                    system=prompt["system"],
                     task_description=prompt["task_description"],
                     code=code,
                     num_reflections=num_reflections,
@@ -50,6 +123,8 @@ def generate_experiment(
                 msg_history=msg_history,
             )
     
+
+
 
 def generate_plot(
     base_dir,
@@ -91,56 +166,6 @@ def experiment_exists(base_dir) -> bool:
 
 
 
-
-metric_first_prompt = """{task_description}
-
-Here are the metrics that you have already generated:
-
-'''
-{prev_metrics_string}
-'''
-
-Come up with the next meaningful and creative evaluation metric for assessing progress in this task.
-You should define a metric that captures useful aspects of performance, going beyond simple accuracy or loss where possible.
-
-Be sure the metric is:
-- Quantifiable and reproducible.
-- Not overly reliant on specific datasets or model architectures.
-- Aligned with the overall goals of the task described above.
-
-Respond in the following format:
-
-THOUGHT:
-<THOUGHT>
-
-NEW METRIC JSON:
-```json
-<JSON>
-"""
-
-
-metric_reflection_prompt = """Round {current_round}/{num_reflections}.
-
-Carefully reconsider the metric you just proposed. In your thoughts, assess:
-- How useful and meaningful the metric is in this context.
-- Whether the metric is practical to implement and interpret.
-- Whether it adds something new compared to existing metrics.
-- Whether the JSON is correctly formatted and clearly written.
-
-Try to improve and refine the metric accordingly, keeping the core idea intact unless there's a clear reason to change it.
-
-Respond in the same format as before:
-
-THOUGHT:
-<THOUGHT>
-
-NEW METRIC JSON:
-```json
-<JSON>
-"""
-
-
-
 def generate_metrics(
         base_dir,
         client,
@@ -163,10 +188,13 @@ def generate_metrics(
             print("Error decoding existing metrics. Generating new metrics.")
 
     metric_str_archive = []
-    with open(osp.join(base_dir, "seed_metrics.json"), "r") as f:
-        seed_metrics = json.load(f)
-    for seed_metric in seed_metrics:
-        metric_str_archive.append(json.dumps(seed_metric))
+    seed_file = osp.join(base_dir, "seed_metrics.json")
+    if osp.exists(seed_file):
+        with open(seed_file, "r") as f:
+            seed_metrics = json.load(f)
+        for seed_metric in seed_metrics:
+            metric_str_archive.append(json.dumps(seed_metric))
+
 
     with open(osp.join(base_dir, "prompt.json"), "r") as f:
         prompt = json.load(f)

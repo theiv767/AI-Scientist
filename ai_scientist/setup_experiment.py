@@ -61,14 +61,12 @@ You will have {num_reflections} rounds to iterate on the idea, but do not need t
 
 
 metric_reflection_prompt = """Round {current_round}/{num_reflections}.
-
-Carefully reconsider the metric you just proposed. In your thoughts, assess:
-- How useful and meaningful the metric is in this context.
-- Whether the metric is practical to implement and interpret.
-- Whether it adds something new compared to existing metrics.
-- Whether the JSON is correctly formatted and clearly written.
-
-Try to improve and refine the metric accordingly, keeping the core idea intact unless there's a clear reason to change it.
+In your thoughts, first carefully consider the clarity, relevance, and usefulness of the metric you just created for evaluating the implementation of the idea.
+Include any other factors that you think are important in assessing the quality of this metric, such as objectivity, measurability, and alignment with the goals of the original idea.
+Ensure the metric is clear and concise, and the JSON is in the correct format.
+Do not make things overly complicated.
+In the next attempt, try to refine and improve your metric.
+Stick to the spirit of the original metric unless there are glaring issues.
 
 Respond in the same format as before:
 
@@ -78,7 +76,9 @@ THOUGHT:
 NEW METRIC JSON:
 ```json
 <JSON>
-"""
+
+If there is nothing to improve, simply repeat the previous JSON EXACTLY after the thought and include "I am done" at the end of the thoughts but before the JSON.
+ONLY INCLUDE "I am done" IF YOU ARE MAKING NO MORE CHANGES."""
 
 
 

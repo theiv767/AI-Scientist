@@ -83,70 +83,6 @@ ONLY INCLUDE "I am done" IF YOU ARE MAKING NO MORE CHANGES."""
 
 
 
-
-
-def generate_experiment(
-    base_dir,
-    client,
-    model,
-    num_reflections=5
-):
-
-    # get prompts
-    with open(osp.join(base_dir, "prompt.json"), "r") as f:
-        prompt = json.load(f)
-
-    idea_system_prompt = prompt["system"]
-    task_description=prompt["task_description"]
-
-
-    # get code
-    with open(osp.join(base_dir, "experiment.py"), "r") as f:
-        code = f.read()
-
-
-    #lista de experimentos falhos
-    experiment_failures = []
-
-    msg_history = []
-
-    text, msg_history = get_response_from_llm(
-                metric_first_prompt.format(
-                    system=prompt["system"],
-                    task_description=prompt["task_description"],
-                    code=code,
-                    num_reflections=num_reflections,
-                ),
-                client=client,
-                model=model,
-                system_message=idea_system_prompt,
-                msg_history=msg_history,
-            )
-    
-
-
-
-def generate_plot(
-    base_dir,
-    client,
-    model,
-    num_reflections
-):
-    with open(osp.join(base_dir, "prompt.json"), "r") as f:
-        prompt = json.load(f)    
-
-    idea_system_prompt = prompt["system"]    
-    task_description=prompt["task_description"]
-
-    #final_info
-    with open(osp.join(base_dir, "run_0", "final_info.json"), "r") as f:
-        baseline_results = json.load(f)
-
-    pass
-
-
-
-
 def experiment_exists(base_dir) -> bool:
     # Verifica se o arquivo 'experiment.py' existe no diretório base
     experiment_path = osp.join(base_dir, "experiment.py")
@@ -162,7 +98,6 @@ def experiment_exists(base_dir) -> bool:
         return True
     
     return False
-
 
 
 
@@ -342,6 +277,68 @@ def generate_next_metric(
         json.dump(metric_archive, f, indent=4)
 
     return metric_archive
+
+
+
+def generate_experiment(
+    base_dir,
+    client,
+    model,
+    num_reflections=5
+):
+
+    # get prompts
+    with open(osp.join(base_dir, "prompt.json"), "r") as f:
+        prompt = json.load(f)
+
+    idea_system_prompt = prompt["system"]
+    task_description=prompt["task_description"]
+
+
+    # get code
+    with open(osp.join(base_dir, "experiment.py"), "r") as f:
+        code = f.read()
+
+
+    #lista de experimentos falhos
+    experiment_failures = []
+
+    msg_history = []
+
+    text, msg_history = get_response_from_llm(
+                metric_first_prompt.format(
+                    system=prompt["system"],
+                    task_description=prompt["task_description"],
+                    code=code,
+                    num_reflections=num_reflections,
+                ),
+                client=client,
+                model=model,
+                system_message=idea_system_prompt,
+                msg_history=msg_history,
+            )
+
+
+
+
+def generate_plot(
+    base_dir,
+    client,
+    model,
+    num_reflections
+):
+    with open(osp.join(base_dir, "prompt.json"), "r") as f:
+        prompt = json.load(f)    
+
+    idea_system_prompt = prompt["system"]    
+    task_description=prompt["task_description"]
+
+    #final_info
+    with open(osp.join(base_dir, "run_0", "final_info.json"), "r") as f:
+        baseline_results = json.load(f)
+
+
+
 
 
 

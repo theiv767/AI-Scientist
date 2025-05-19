@@ -12,8 +12,7 @@ S2_API_KEY = os.getenv("S2_API_KEY")
 
 
 
-metric_first_prompt = """{system}
-{task_description}
+metric_first_prompt = """{task_description}
 
 Here are the metrics you have already generated:
 
@@ -101,12 +100,19 @@ def experiment_exists(base_dir) -> bool:
 
 
 
+def search_similar_metrics(task_description: str, num_results: int = 5) -> List[str]:
+    # use Semantic Scholar API here
+    # extract titles + snippets related to evaluation metrics
+    # return list of candidate metric names or descriptions
+    pass
+
+
 def generate_metrics(
         base_dir,
         client,
         model,
         skip_generation=False,
-        max_num_generations=20,
+        max_num_generations=5,
         num_reflections=5,
 ):
     if skip_generation:
@@ -233,7 +239,7 @@ def generate_next_metric(
                     metric_first_prompt.format(
                         task_description=task_description,
                         prev_metrics_string=prev_metrics_string,
-                        num_reflections=num_reflections,
+                        num_reflections=num_reflections
                     ),
                     client=client,
                     model=model,
@@ -305,18 +311,26 @@ def generate_experiment(
 
     msg_history = []
 
-    text, msg_history = get_response_from_llm(
-                metric_first_prompt.format(
-                    system=prompt["system"],
-                    task_description=prompt["task_description"],
-                    code=code,
-                    num_reflections=num_reflections,
-                ),
-                client=client,
-                model=model,
-                system_message=idea_system_prompt,
-                msg_history=msg_history,
-            )
+    generate_metrics(
+        base_dir=base_dir,
+        client=client,
+        model=model
+        
+    )
+
+
+#    text, msg_history = get_response_from_llm(
+#                metric_first_prompt.format(
+#                    system=prompt["system"],
+#                    task_description=prompt["task_description"],
+#                    code=code,
+#                    num_reflections=num_reflections,
+#                ),
+#                client=client,
+#                model=model,
+#                system_message=idea_system_prompt,
+#                msg_history=msg_history,
+#            )
 
 
 
@@ -342,11 +356,42 @@ def generate_plot(
 
 
 
-if __name__ == "__main__":
+def setup_experiment(
+    base_dir,
+    client,
+    model,
+    num_reflections
+
+):
     NUM_REFLECTIONS = 5
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate AI scientist ideas")
+    parser = argparse.ArgumentParser(description="Generate AI scientist initial experiment, metrics e plots")
+    # add type of experiment (nanoGPT, Boston, etc.)
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        default="julIA",
+        help="Experiment to run AI Scientist on.",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="deepseek-chat",
+        choices=AVAILABLE_LLMS,
+        help="Model to use for AI Scientist.",
+    )
+    parser.add_argument(
+        "--skip-idea-generation",
+        action="store_true",
+        help="Skip idea generation and use existing ideas.",
+    )
+    parser.add_argument(
+        "--check-novelty",
+        action="store_true",
+        help="Check novelty of ideas.",
+    )
+
     args = parser.parse_args()
 
 

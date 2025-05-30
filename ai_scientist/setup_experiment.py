@@ -1,11 +1,19 @@
 import json
 import os
+import sys
 import os.path as osp
 import time
 from typing import List, Dict, Union
 
+from aider.coders import Coder
+from aider.io import InputOutput
+from aider.models import Model
+from datetime import datetime
+
 import requests
 
+from ai_scientist.generate_experiment import generate_experiment
+from ai_scientist.generate_experiment import generate_experiment_plot
 from ai_scientist.llm import get_response_from_llm, extract_json_between_markers, create_client, AVAILABLE_LLMS
 
 S2_API_KEY = os.getenv("S2_API_KEY")
@@ -143,6 +151,14 @@ def generate_metrics(
     idea_system_prompt = prompt["system"]
     task_description = prompt["task_description"]
 
+
+    # TO DO ---------------------------------------------------------------------
+    # MELHORAR O PROMPT 'metric_first_prompt' COM RESULTADOS DO semantic_schoolar
+    # OBS:
+    # - criar qry para semantic_schoolar buscando métricas comuns para o problema descrito em system e task_description
+    # - concatenar resultados relevantes no 'metric_first_prompt'
+    #----------------------------------------------------------------------------
+
     for i in range(max_num_generations):
         print()
         print(f"Generating metric {i + 1}/{max_num_generations}")
@@ -169,6 +185,14 @@ def generate_metrics(
 
             if num_reflections > 1:
                 for j in range(num_reflections - 1):
+
+                    # TO DO ---------------------------------------------------------------------
+                    # MELHORAR O PROMPT 'metric_reflection_prompt' COM RESULTADOS DO semantic_schoolar
+                    # OBS:
+                    # - criar qry para semantic_schoolar com base em dados da métrica e sua usabilidade no meio academico, comparando com o problema atual
+                    # - concatenar resultados relevantes no 'metric_reflection_prompt'
+                    #----------------------------------------------------------------------------
+
                     print(f"Iteration {j + 2}/{num_reflections}")
                     text, msg_history = get_response_from_llm(
                         metric_reflection_prompt.format(
@@ -286,52 +310,86 @@ def generate_next_metric(
 
 
 
-def generate_experiment(
+
+def print_time():
+    print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+def generate_code(
     base_dir,
     client,
     model,
-    num_reflections=5
+    metrics,
+    num_reflections=5,
+    log_file=False,
 ):
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # get prompts
-    with open(osp.join(base_dir, "prompt.json"), "r") as f:
-        prompt = json.load(f)
-
-    idea_system_prompt = prompt["system"]
-    task_description=prompt["task_description"]
+    results_folder_name = osp.join(base_dir, "setup")
+    os.makedirs(results_folder_name, exist_ok=True)
 
 
-    # get code
-    with open(osp.join(base_dir, "experiment.py"), "r") as f:
-        code = f.read()
+    exp_file = osp.join(base_dir, "experiment.py")
+    #vis_file = osp.join(base_dir, "plot.py")
+    notes = osp.join(results_folder_name, "notes.txt")
+    with open(notes, "w") as f:
+        f.write(f"# Title: base_code\n")
+        f.write(f"Results: {results_folder_name}\n")
+        f.write(f"Description: Baseline results.\n")
+    if log_file:
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        log_path = osp.join(results_folder_name, "log.txt")
+        log = open(log_path, "a")
+        sys.stdout = log
+        sys.stderr = log
 
 
-    #lista de experimentos falhos
-    experiment_failures = []
 
-    msg_history = []
+    fnames = [exp_file, notes]
 
-    generate_metrics(
-        base_dir=base_dir,
-        client=client,
-        model=model
-        
+    chat_history_file = os.path.join(results_folder_name, "code_aider.txt")
+    io = InputOutput(
+        yes=True, chat_history_file=chat_history_file
     )
 
+    if model == "deepseek-coder-v2-0724":
+        main_model = Model("deepseek/deepseek-coder")
+    elif model == "deepseek-reasoner":
+        main_model = Model("deepseek/deepseek-reasoner")
+    elif model == "deepseek-chat":
+        main_model = Model("deepseek/deepseek-chat")
+    elif model == "llama3.1-405b":
+        main_model = Model("openrouter/meta-llama/llama-3.1-405b-instruct")
+    else:
+        main_model = Model(model)
 
-#    text, msg_history = get_response_from_llm(
-#                metric_first_prompt.format(
-#                    system=prompt["system"],
-#                    task_description=prompt["task_description"],
-#                    code=code,
-#                    num_reflections=num_reflections,
-#                ),
-#                client=client,
-#                model=model,
-#                system_message=idea_system_prompt,
-#                msg_history=msg_history,
-#            )
+    coder = Coder.create(
+        main_model=main_model,
+        fnames=fnames,
+        io=io,
+        stream=False,
+        use_git=False,
+        edit_format="diff",
+    )
 
+    print_time()
+    print(f"*Generating Experiment*")
+    try:
+        success = generate_experiment(base_dir, metrics, coder, results_folder_name)
+
+    except Exception as e:
+        print(f"Error during experiment generation: {e}")
+        print(f"Experiment failed")
+        return False
+
+    if not success:
+        print(f"Experiment failed")
+        return False
+
+
+    print_time()
+    print(f"*Finish Experiment Generation*")
 
 
 
@@ -339,18 +397,76 @@ def generate_plot(
     base_dir,
     client,
     model,
-    num_reflections
+    num_reflections=5,
+    log_file=False,
 ):
-    with open(osp.join(base_dir, "prompt.json"), "r") as f:
-        prompt = json.load(f)    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    idea_system_prompt = prompt["system"]    
-    task_description=prompt["task_description"]
+    results_folder_name = osp.join(base_dir, "setup")
+    os.makedirs(results_folder_name, exist_ok=True)
 
-    #final_info
-    with open(osp.join(base_dir, "run_0", "final_info.json"), "r") as f:
-        baseline_results = json.load(f)
 
+    exp_file = osp.join(base_dir, "plot.py")
+    #vis_file = osp.join(base_dir, "plot.py")
+    notes = osp.join(results_folder_name, "notes.txt")
+    with open(notes, "w") as f:
+        f.write(f"# Title: base_code\n")
+        f.write(f"Results: {results_folder_name}\n")
+        f.write(f"Description: Baseline results.\n")
+    if log_file:
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        log_path = osp.join(results_folder_name, "log.txt")
+        log = open(log_path, "a")
+        sys.stdout = log
+        sys.stderr = log
+
+
+
+    fnames = [exp_file, notes]
+
+    chat_history_file = os.path.join(results_folder_name, "code_aider.txt")
+    io = InputOutput(
+        yes=True, chat_history_file=chat_history_file
+    )
+
+    if model == "deepseek-coder-v2-0724":
+        main_model = Model("deepseek/deepseek-coder")
+    elif model == "deepseek-reasoner":
+        main_model = Model("deepseek/deepseek-reasoner")
+    elif model == "deepseek-chat":
+        main_model = Model("deepseek/deepseek-chat")
+    elif model == "llama3.1-405b":
+        main_model = Model("openrouter/meta-llama/llama-3.1-405b-instruct")
+    else:
+        main_model = Model(model)
+
+    coder = Coder.create(
+        main_model=main_model,
+        fnames=fnames,
+        io=io,
+        stream=False,
+        use_git=False,
+        edit_format="diff",
+    )
+
+    print_time()
+    print(f"*Generating Plot*")
+    try:
+        success = generate_experiment_plot(base_dir, coder, results_folder_name)
+
+    except Exception as e:
+        print(f"Error during plot generation: {e}")
+        print(f"Plot failed")
+        return False
+
+    if not success:
+        print(f"Plot failed")
+        return False
+
+
+    print_time()
+    print(f"*Finish Plot Generation*")
 
 
 
@@ -392,6 +508,12 @@ def setup_experiment(
         help="Check novelty of ideas.",
     )
 
+    parser.add_argument(
+        "--skip-metric-generation",
+        action="store_true",
+        help="Skip idea generation and use existing ideas.",
+    )
+
     args = parser.parse_args()
 
 
@@ -402,10 +524,18 @@ def setup_experiment(
 
 
     if not experiment_exists(base_dir=base_dir):
-        code = generate_experiment(
+        metrics = generate_metrics(
+            base_dir=base_dir,
+            client=client,
+            model=model,
+            skip_generation=True
+        )
+
+        code = generate_code(
             base_dir,
             client=client,
             model=client_model,
+            metrics=metrics,
             num_reflections=NUM_REFLECTIONS
         )   
 

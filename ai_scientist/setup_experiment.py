@@ -123,9 +123,12 @@ def generate_metrics(
         max_num_generations=5,
         num_reflections=5,
 ):
+    setup_dir = osp.join(base_dir, "setup")
+    os.makedirs(setup_dir, exist_ok=True)
+
     if skip_generation:
         try:
-            with open(osp.join(base_dir, "metrics.json"), "r") as f:
+            with open(osp.join(setup_dir, "metrics.json"), "r") as f:
                 metrics = json.load(f)
             print("Loaded existing metrics:")
             for metric in metrics:
@@ -218,7 +221,9 @@ def generate_metrics(
             continue
 
     metrics = [json.loads(m) for m in metric_str_archive]
-    with open(osp.join(base_dir, "metrics.json"), "w") as f:
+
+        
+    with open(osp.join(setup_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=4)
 
     return metrics
@@ -235,6 +240,9 @@ def generate_next_metric(
 ):
     metric_archive = prev_metric_archive
     original_archive_size = len(metric_archive)
+
+    setup_dir = osp.join(base_dir, "setup")
+    os.makedirs(setup_dir, exist_ok=True)
 
     print(f"Generating metric {original_archive_size + 1}")
 
@@ -302,8 +310,8 @@ def generate_next_metric(
             except Exception as e:
                 print(f"Failed to generate metric: {e}")
                 continue
-
-    with open(osp.join(base_dir, "metrics.json"), "w") as f:
+        
+    with open(osp.join(setup_dir, "metrics.json"), "w") as f:
         json.dump(metric_archive, f, indent=4)
 
     return metric_archive
@@ -472,6 +480,156 @@ def generate_plot(
 
 
 
+
+
+
+seed_ideas_prompt = """{task_description}
+<experiment.py>
+{code}
+</experiment.py>
+
+
+Propose one impactful and creative idea for a research experiment or direction that can be realistically explored with the code provided. This should be the only idea generated.
+Note that you will not have access to any additional resources or datasets.
+Make sure any idea is not overfit the specific training dataset or model, and has wider significance.
+
+Respond in the following format:
+
+THOUGHT:
+<THOUGHT>
+
+NEW IDEA JSON:
+```json
+<JSON>
+```
+
+In <THOUGHT>, first briefly discuss your intuitions and motivations for the idea. Detail your high-level plan, necessary design choices and ideal outcomes of the experiments. Justify how the idea is different from the existing ones.
+
+In <JSON>, provide the new idea in JSON format with the following fields:
+- "Name": A shortened descriptor of the idea. Lowercase, no spaces, underscores allowed.
+- "Title": A title for the idea, will be used for the report writing.
+- "Experiment": An outline of the implementation. E.g. which functions need to be added or modified, how results will be obtained, ...
+- "Interestingness": A rating from 1 to 10 (lowest to highest).
+- "Feasibility": A rating from 1 to 10 (lowest to highest).
+- "Novelty": A rating from 1 to 10 (lowest to highest).
+
+
+Example (for format only — do not reuse or be inspired by its content):
+
+  {{
+    "Name": "adaptive_block_size",
+    "Title": "Adaptive Block Size: Dynamic Context Window Adjustment for Efficient Training",
+    "Experiment": "Modify the model to dynamically adjust its block size during training, starting with a smaller block size and gradually increasing it. This could potentially lead to faster initial training and better long-range dependency learning.",
+    "Interestingness": 6,
+    "Feasibility": 4,
+    "Novelty": 4
+  }}
+Use the example above strictly to understand the expected JSON structure.
+
+
+Be cautious and realistic on your ratings.
+This JSON will be automatically parsed, so ensure the format is precise.
+You will have {num_reflections} rounds to iterate on the idea, but do not need to use them all.
+"""
+
+seed_ideas_reflection_prompt = """Round {current_round}/{num_reflections}.
+In your thoughts, first carefully consider the quality, novelty, and feasibility of the idea you just created.
+Include any other factors that you think are important in evaluating the idea.
+Ensure the idea is clear and concise, and the JSON is the correct format.
+Do not make things overly complicated.
+In the next attempt, try and refine and improve your idea.
+Stick to the spirit of the original idea unless there are glaring issues.
+
+Respond in the same format as before:
+THOUGHT:
+<THOUGHT>
+
+NEW IDEA JSON:
+```json
+<JSON>
+```
+
+If there is nothing to improve, simply repeat the previous JSON EXACTLY after the thought and include "I am done" at the end of the thoughts but before the JSON.
+ONLY INCLUDE "I am done" IF YOU ARE MAKING NO MORE CHANGES."""
+
+
+
+def generate_seed_ideas(
+        base_dir,
+        client,
+        model,
+        skip_generation=False,
+        num_reflections=5,
+):
+    with open(osp.join(base_dir, "experiment.py"), "r") as f:
+        code = f.read()
+
+    with open(osp.join(base_dir, "prompt.json"), "r") as f:
+        prompt = json.load(f)
+
+    idea_system_prompt = prompt["system"]
+
+    idea_str_archive = []
+
+    print()
+    print("Generating seed_ideas")
+    try:
+        msg_history = []
+        print(f"Iteration 1/{num_reflections}")
+        text, msg_history = get_response_from_llm(
+            seed_ideas_prompt.format(
+                task_description=prompt["task_description"],
+                code=code,
+                num_reflections=num_reflections,
+            ),
+            client=client,
+            model=model,
+            system_message=idea_system_prompt,
+            msg_history=msg_history,
+        )
+        ## PARSE OUTPUT
+        json_output = extract_json_between_markers(text)
+        assert json_output is not None, "Failed to extract JSON from LLM output"
+        print(json_output)
+        # Iteratively improve task.
+        if num_reflections > 1:
+            for j in range(num_reflections - 1):
+                print(f"Iteration {j + 2}/{num_reflections}")
+                text, msg_history = get_response_from_llm(
+                    seed_ideas_reflection_prompt.format(
+                        current_round=j + 2, num_reflections=num_reflections
+                    ),
+                    client=client,
+                    model=model,
+                    system_message=idea_system_prompt,
+                    msg_history=msg_history,
+                )
+                ## PARSE OUTPUT
+                json_output = extract_json_between_markers(text)
+                assert (
+                        json_output is not None
+                ), "Failed to extract JSON from LLM output"
+                print(json_output)
+                if "I am done" in text:
+                    print(f"Idea generation converged after {j + 2} iterations.")
+                    break
+                                                                                                                
+        idea_str_archive.append(json.dumps(json_output))
+    except Exception as e:
+        print(f"Failed to generate idea: {e}")
+
+    ## SAVE IDEAS
+    seed_ideas = []
+    for idea_str in idea_str_archive:
+        seed_ideas.append(json.loads(idea_str))
+
+    with open(osp.join(base_dir, "seed_ideas.json"), "w") as f:
+        json.dump(seed_ideas, f, indent=4)
+
+    return seed_ideas
+
+
+
 def setup_experiment(
     base_dir,
     client,
@@ -514,6 +672,12 @@ def setup_experiment(
         help="Skip idea generation and use existing ideas.",
     )
 
+    parser.add_argument(
+        "--skip-seed-idea-generation",
+        action="store_true",
+        help="Skip idea generation and use existing ideas.",
+    )
+
     args = parser.parse_args()
 
 
@@ -524,11 +688,15 @@ def setup_experiment(
 
 
     if not experiment_exists(base_dir=base_dir):
+        print()
+        print(f"*Starting Setup*")
+
         metrics = generate_metrics(
             base_dir=base_dir,
             client=client,
             model=model,
-            skip_generation=True
+            skip_generation=args.skip_metric_generation,        
+            num_reflections=NUM_REFLECTIONS
         )
 
         code = generate_code(
@@ -546,3 +714,15 @@ def setup_experiment(
             num_reflections=NUM_REFLECTIONS
         )
 
+        seed_ideas = generate_seed_ideas(
+            base_dir,
+            client=client,
+            model=client_model,
+            skip_generation=args.skip_seed_idea_generation,
+            num_reflections=NUM_REFLECTIONS,
+
+        )
+
+        print()
+        print(f"*Setup completed*")
+        print()

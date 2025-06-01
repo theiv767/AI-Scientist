@@ -10,6 +10,7 @@ from aider.io import InputOutput
 from aider.models import Model
 from datetime import datetime
 
+import backoff
 import requests
 
 from ai_scientist.generate_experiment import generate_experiment
@@ -41,6 +42,13 @@ Describe the metric in a concise way, including its name, what it measures, how 
 
 Note that you will not have access to any additional resources or datasets.
 Make sure that no metric is overfitted to the specific dataset or training model and has a broader meaning.
+
+
+Here are examples of academic papers with tasks similar to yours. Use them to understand common evaluation methods and guide your choice of assessment strategies, if they are relevant to your task:
+'''
+{papers}
+'''
+
 
 Respond in the following format:
 
@@ -155,12 +163,12 @@ def generate_metrics(
     task_description = prompt["task_description"]
 
 
-    # TO DO ---------------------------------------------------------------------
-    # MELHORAR O PROMPT 'metric_first_prompt' COM RESULTADOS DO semantic_schoolar
-    # OBS:
-    # - criar qry para semantic_schoolar buscando métricas comuns para o problema descrito em system e task_description
-    # - concatenar resultados relevantes no 'metric_first_prompt'
-    #----------------------------------------------------------------------------
+    papers = search_metrics_for_papers(
+        base_dir=base_dir,
+        client=client,
+        model=model
+    )
+
 
     for i in range(max_num_generations):
         print()
@@ -174,6 +182,7 @@ def generate_metrics(
                 metric_first_prompt.format(
                     task_description=task_description,
                     prev_metrics_string=prev_metrics_string,
+                    papers=papers,
                     num_reflections=num_reflections,
                 ),
                 client=client,
@@ -316,6 +325,173 @@ def generate_next_metric(
 
     return metric_archive
 
+
+
+
+
+semantic_scholar_query_prompt = """TASK DESCRIPTION:
+'''
+{task_description}
+'''
+
+Your task is to create a query to search for papers similar to the task description above.
+
+The query created must:
+- be short, with few words
+- contain keywords relevant to the task description, these keywords can be the research area, technique used, name of some technology addressed, etc. (examples: classification, artificial intelligence, gpt, ...)
+
+THOUGHT:
+<THOUGHT>
+
+ANSWER:
+
+JSON OUTPUT:
+```json
+<JSON>
+```
+
+
+In <THOUGHT> Reflect on the task description and try to generalize it to get words relevant to the task description and comprehensive to find the papers most similar to the task description
+
+In <JSON>, respond in JSON format with ONLY the following field:
+
+- "Query": A search query is used to search the literature (for example, attention is all you need). the query will be used to search the semantic scholar api.
+
+This JSON will be parsed automatically, so make sure the format is correct."""
+
+
+
+
+paper_metrics_prompt = """
+You are given a list of scientific papers from the Semantic Scholar API. Each paper includes a title and an abstract.
+
+Here is the Semantic Scholar data for you to process as instructed:
+'''
+{semantic_scholar}
+'''
+
+
+Your task is to:
+- Identify any evaluation metrics, techniques, or any other explicit forms of evaluation mentioned in the abstract (e.g., accuracy, F1-score, BLEU, ablation study, human evaluation, etc.)
+- Generate a short summary of the abstract (1–2 sentences).
+- Return the output in JSON format as described below.
+
+Only consider metrics that are explicitly mentioned in the abstract.
+Do not make assumptions or use external knowledge.
+Do not include the full abstract in the output.
+
+
+Respond in the following format:
+
+THOUGHT:
+<THOUGHT>
+
+JSON OUTPUT:
+```json
+<JSON>
+```
+
+In THOUGHT, briefly describe your approach for identifying the metrics and summarizing the content. Mention any patterns or keywords you looked for.
+
+In JSON OUTPUT, provide an array of papers with the following fields:
+- "title": the paper’s title
+- "summary": a short summary of the abstract
+- "evaluation": a list of evaluation metrics, techniques, or any other explicit forms of evaluation mentioned in the abstract (e.g., accuracy, F1-score, BLEU, ablation study, human evaluation, etc.)
+
+Be concise and accurate. The JSON will be automatically parsed, so ensure the format is valid and consistent.
+"""
+
+def on_backoff(details):
+    print(
+        f"Backing off {details['wait']:0.1f} seconds after {details['tries']} tries "
+        f"calling function {details['target'].__name__} at {time.strftime('%X')}"
+    )
+
+
+@backoff.on_exception(
+    backoff.expo, requests.exceptions.HTTPError, on_backoff=on_backoff
+)
+def search_for_papers(query, result_limit=10, engine="semanticscholar") -> Union[None, List[Dict]]:
+    if not query:
+        return None
+    if engine == "semanticscholar":
+        rsp = requests.get(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            headers={"X-API-KEY": S2_API_KEY} if S2_API_KEY else {},
+            params={
+                "query": query,
+                "limit": result_limit,
+                "fields": "title,abstract",  # Apenas os campos necessários
+            },
+        )
+        print(f"Response Status Code: {rsp.status_code}")
+        print(
+            f"Response Content: {rsp.text[:500]}"
+        )  # Print the first 500 characters of the response content
+        rsp.raise_for_status()
+        results = rsp.json()
+        total = results["total"]
+        time.sleep(1.0)
+        if not total:
+            return None
+
+        papers = results["data"]
+        return papers
+
+
+def search_metrics_for_papers(
+        base_dir,
+        client,
+        model
+    ):
+    with open(osp.join(base_dir, "prompt.json"), "r") as f:
+        prompt = json.load(f)
+
+    system_prompt = prompt["system"]
+    task_description = prompt["task_description"]
+
+    try:
+
+        sm_qry_history = []
+        text, sm_qry_history = get_response_from_llm(
+            semantic_scholar_query_prompt.format(
+                task_description=task_description
+            ),
+            client=client,
+            model=model,
+            system_message=system_prompt,
+            msg_history=sm_qry_history
+        )
+
+        json_output = extract_json_between_markers(text)
+        assert json_output is not None, "Failed to extract JSON from LLM output"
+
+        ## SEARCH FOR PAPERS
+        query = json_output["Query"]
+        papers = search_for_papers(query, result_limit=10)
+
+        paper_metrics_history = []
+        text, paper_metrics_history = get_response_from_llm(
+            paper_metrics_prompt.format(
+                semantic_scholar=papers
+            ),
+            client=client,
+            model=model,
+            system_message=system_prompt,
+            msg_history=paper_metrics_history
+        )
+
+        json_output = extract_json_between_markers(text)
+        assert json_output is not None, "Failed to extract JSON from LLM output"
+        print(json_output)
+
+
+        return json_output
+
+
+    except Exception as e:
+         print(f"Error: {e}")
+         return 'No papers available'
 
 
 
@@ -627,6 +803,8 @@ def generate_seed_ideas(
         json.dump(seed_ideas, f, indent=4)
 
     return seed_ideas
+
+
 
 
 

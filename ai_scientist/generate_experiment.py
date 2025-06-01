@@ -57,9 +57,13 @@ Example of `final_info.json` contents:
 
 
 ## Data:
-'''
 {load_data_prompt}
-'''
+
+
+
+## Observations and possible tools:
+{load_notes_prompt}
+
 
 ## Constraints:
 - Do not include extra explanations, only the necessary code.
@@ -75,9 +79,10 @@ load_data_prompt = """
 The files below are located in the `data` folder. Load them in your code using relative paths like `data/filename.ext`. Assume they are available at runtime.
 Your code must load the actual files from the `data` folder.
 Available files (preview):
+'''
 {files}
+'''
 """
-
 
 def load_data(base_dir, char_limit=4000):
     data_dir = os.path.join(base_dir, 'data')
@@ -102,6 +107,27 @@ def load_data(base_dir, char_limit=4000):
     files_json = json.dumps(files, indent=2, ensure_ascii=False)
 
     return files_json
+
+
+
+load_notes_prompt = """
+Below are notes, tools, parameters, or other relevant information that may help you implement the best possible solution:
+'''
+{notes}
+'''
+"""
+
+def load_notes(base_dir):
+    notes_path = os.path.join(base_dir, "setup_notes.txt")
+
+    if not os.path.exists(notes_path) or not os.path.isfile(notes_path):
+        return None
+
+    with open(notes_path, "r", encoding="utf-8") as f:
+        notes = f.read()
+
+    return notes
+
 
 
 
@@ -154,22 +180,34 @@ def generate_experiment(base_dir, metrics, coder, feedback_folder_name):
 
 
     data_files = load_data(base_dir)
-
     data_prompt = """There is no data or dataset available for this task. 
 You must proceed using only the task description and any assumptions or mock data you deem appropriate.
 """
-
     if data_files:
         data_prompt = load_data_prompt.format(
             files=data_files
         )
+
+
+    notes = load_notes(base_dir)
+    notes_prompt = """No supplementary information has been supplied. 
+Rely on your own reasoning to design and implement a suitable solution.
+"""
+
+    if notes:
+        notes_prompt=load_notes_prompt.format(
+            notes=notes
+        )
+
+
 
     result_title = "autogen_result"
     prompt_base = coder_experiment_prompt.format(
         task_description=task_description, 
         result_title=result_title,
         metrics=metrics, 
-        load_data_prompt=data_prompt        
+        load_data_prompt=data_prompt,
+        load_notes_prompt=notes_prompt
 
     )
 

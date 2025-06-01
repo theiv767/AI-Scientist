@@ -55,6 +55,12 @@ Example of `final_info.json` contents:
 - Report at least the following metrics: {metrics}
 - Be as clear and modular as possible, but not overly complex
 
+
+## Data:
+'''
+{load_data_prompt}
+'''
+
 ## Constraints:
 - Do not include extra explanations, only the necessary code.
 
@@ -64,8 +70,41 @@ You can then implement the next thing on your list.
 """
 
 
-def hash_code(code):
-    return hashlib.sha256(code.encode()).hexdigest()
+
+load_data_prompt = """
+The files below are located in the `data` folder. Load them in your code using relative paths like `data/filename.ext`. Assume they are available at runtime.
+Your code must load the actual files from the `data` folder.
+Available files (preview):
+{files}
+"""
+
+
+def load_data(base_dir, char_limit=4000):
+    data_dir = os.path.join(base_dir, 'data')
+
+    if not os.path.exists(data_dir) or not os.path.isdir(data_dir):
+        return None
+
+    files = []
+    for file_name in os.listdir(data_dir):
+        file_path = os.path.join(data_dir, file_name)
+        if os.path.isfile(file_path):
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(char_limit + 1)
+            truncated = len(content) > char_limit
+            content = content[:char_limit]
+            files.append({
+                'filename': file_name,
+                'content': content,
+                'truncated': truncated
+            })
+    
+    files_json = json.dumps(files, indent=2, ensure_ascii=False)
+
+    return files_json
+
+
+
 
 def run_experiment(folder_name, timeout=600):
     cwd = os.path.abspath(folder_name)
@@ -113,13 +152,26 @@ def generate_experiment(base_dir, metrics, coder, feedback_folder_name):
     idea_system_prompt = prompt["system"]
     task_description=prompt["task_description"]
 
+
+    data_files = load_data(base_dir)
+
+    data_prompt = """There is no data or dataset available for this task. 
+You must proceed using only the task description and any assumptions or mock data you deem appropriate.
+"""
+
+    if data_files:
+        data_prompt = load_data_prompt.format(
+            files=data_files
+        )
+
     result_title = "autogen_result"
     prompt_base = coder_experiment_prompt.format(
         task_description=task_description, 
+        result_title=result_title,
         metrics=metrics, 
-        result_title=result_title                              
-    )
+        load_data_prompt=data_prompt        
 
+    )
 
     attempts = 0
     failed_codes = set()
